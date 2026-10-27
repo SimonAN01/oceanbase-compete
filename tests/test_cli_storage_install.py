@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from oceanbase_compete.cli import _write_export, csv_text, exit_code, main, parser, version_args
-from oceanbase_compete.errors import ToolError
+from oceanbase_compete.errors import ProtocolError, ToolError
 from oceanbase_compete.storage import Store, read_json, write_json
 from oceanbase_compete.workflow import verify_remote
 from oceanbase_compete.cli import run
@@ -59,6 +59,22 @@ class CLITests(unittest.TestCase):
         for args in [['--cookie-file', 'local.txt', 'auth', 'check'], ['auth', '--cookie-file', 'local.txt', 'check'], ['auth', 'check', '--cookie-file', 'local.txt']]:
             with self.subTest(args=args):
                 self.assertEqual(parser().parse_args(args).cookie_file, 'local.txt')
+
+    def test_terminal_result_survives_a_changing_leaderboard(self):
+        with tempfile.TemporaryDirectory() as td:
+            api, clock = FakeAPI(), Clock()
+            workflow = Workflow(api, Store(td), remote_check=lambda *a: {'verified': True}, sleep=clock.sleep, clock=clock)
+            workflow.create_profile('example', track='powercontext', branch='feature/csv', commit=COMMIT_A)
+            with patch.object(workflow, 'snapshot', side_effect=ProtocolError('Leaderboard final page changed during capture')):
+                result = run(parser().parse_args(['submit', '--profile', 'example', '--wait', '--snapshot']), workflow, lambda _: None)
+            self.assertEqual(result['result']['state'], 'SUCCEEDED')
+            self.assertEqual(read_json(result['receipt'])['result']['state'], 'SUCCEEDED')
+            self.assertFalse(result['leaderboard']['complete'])
+            self.assertEqual(result['leaderboard']['outcome'], 'protocol_error')
+            self.assertEqual(exit_code(result), 1)
+            result['result']['state'] = 'FAILED'
+            self.assertEqual(exit_code(result), 2)
+            self.assertEqual(len(api.submissions), 1)
 
     def test_unknown_auth_values_are_never_needed_as_arguments(self):
         parsed = parser().parse_args(['auth', 'check', '--cookie-stdin'])

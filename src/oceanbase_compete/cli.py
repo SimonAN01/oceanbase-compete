@@ -188,7 +188,11 @@ def run(args, workflow, emit):
         if args.wait and not args.dry_run:
             result["result"] = workflow.wait_score(result["receipt"], args.interval, args.timeout, emit=emit)
             if args.snapshot and result["result"]["state"] in ("SUCCEEDED", "FAILED", "CANCELLED"):
-                result["leaderboard"] = workflow.snapshot(args.profile, receipt_path=result["receipt"])
+                try:
+                    result["leaderboard"] = workflow.snapshot(args.profile, receipt_path=result["receipt"])
+                except ToolError as exc:
+                    # A separate read must not hide the completed submission or its receipt.
+                    result["leaderboard"] = {"complete": False, "outcome": exc.outcome, "message": str(exc), **exc.details}
         return result
     if args.command == "adopt":
         return workflow.adopt(args.profile, args.task_id)
@@ -257,6 +261,8 @@ def exit_code(result):
         return 2
     if state in ("QUEUED", "RUNNING") or result.get("outcome") in ("queue_waiting", "queue_submission_cap_reached", "watch_deadline_reached"):
         return 3
+    if result.get("leaderboard", {}).get("complete") is False:
+        return 1
     return 0
 
 
