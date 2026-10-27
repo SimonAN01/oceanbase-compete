@@ -97,17 +97,18 @@ class CLITests(unittest.TestCase):
 
     def test_cli_json_output_redacts_credentials(self):
         out, err = io.StringIO(), io.StringIO()
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {'OBCOMP_COOKIE': 'authorization=synthetic-auth-secret'}, clear=True), patch('oceanbase_compete.cli.run', return_value={'message': 'synthetic-auth-secret', 'task_id': '101'}), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {'OBCOMP_COOKIE': 'authorization=synthetic-auth-secret', 'OBCOMP_COOKIE_FILE': ''}), patch('oceanbase_compete.cli.run', return_value={'message': 'synthetic-auth-secret', 'task_id': '101'}), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = main(['auth', 'check', '--state-dir', td])
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 0, err.getvalue())
         self.assertNotIn('synthetic-auth-secret', out.getvalue())
         self.assertIn('101', out.getvalue())
 
     def test_cli_error_redacts_credentials(self):
         out, err = io.StringIO(), io.StringIO()
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {'OBCOMP_COOKIE': 'authorization=synthetic-auth-secret'}, clear=True), patch('oceanbase_compete.cli.run', side_effect=ToolError('synthetic-auth-secret')), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {'OBCOMP_COOKIE': 'authorization=synthetic-auth-secret', 'OBCOMP_COOKIE_FILE': ''}), patch('oceanbase_compete.cli.run', side_effect=ToolError('synthetic-auth-secret')), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = main(['auth', 'check', '--state-dir', td])
         self.assertEqual(code, 1)
+        self.assertIn('[redacted]', err.getvalue())
         self.assertNotIn('synthetic-auth-secret', err.getvalue())
         self.assertEqual(out.getvalue(), '')
 
