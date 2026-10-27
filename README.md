@@ -108,6 +108,8 @@ obcomp submit --profile powercontext-2026 \
 
 ```bash
 obcomp score --receipt /path/to/receipt.json --wait
+# 等待超时后使用同一回执恢复；终止时抓取并关联榜单，不重新提测
+obcomp score --receipt /path/to/receipt.json --wait --snapshot
 obcomp reconcile --receipt /path/to/receipt.json
 obcomp reconcile --receipt /path/to/receipt.json --task-id 123456
 

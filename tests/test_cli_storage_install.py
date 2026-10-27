@@ -44,6 +44,9 @@ class CLITests(unittest.TestCase):
             receipt = submitted['receipt']
             self.assertTrue(read_json(receipt).get('leaderboard_snapshot'))
             self.assertEqual(dispatch(['score', '--receipt', receipt])['state'], 'SUCCEEDED')
+            resumed = dispatch(['score', '--receipt', receipt, '--wait', '--snapshot'])
+            self.assertTrue(resumed['leaderboard']['complete'])
+            self.assertEqual(read_json(receipt)['leaderboard_snapshot']['path'], resumed['leaderboard']['snapshot'])
             self.assertEqual(dispatch(['reconcile', '--receipt', receipt])['task_id'], '101')
             self.assertEqual(dispatch(['adopt', '--profile', 'example', '--task-id', '101'])['receipt'], receipt)
             self.assertTrue(dispatch(['compare', '--before', receipt, '--after', receipt])['comparable'])
@@ -59,6 +62,35 @@ class CLITests(unittest.TestCase):
         for args in [['--cookie-file', 'local.txt', 'auth', 'check'], ['auth', '--cookie-file', 'local.txt', 'check'], ['auth', 'check', '--cookie-file', 'local.txt']]:
             with self.subTest(args=args):
                 self.assertEqual(parser().parse_args(args).cookie_file, 'local.txt')
+
+    def test_pending_score_snapshot_does_not_capture_before_completion(self):
+        with tempfile.TemporaryDirectory() as td:
+            api, clock = FakeAPI(), Clock()
+            workflow = Workflow(api, Store(td), remote_check=lambda *a: {'verified': True}, sleep=clock.sleep, clock=clock)
+            workflow.create_profile('example', track='powercontext', branch='feature/csv', commit=COMMIT_A)
+            api.next_status = 0
+            submitted = workflow.submit('example')
+            with patch.object(workflow, 'snapshot') as capture:
+                result = run(parser().parse_args(['score', '--receipt', submitted['receipt'], '--snapshot']), workflow, lambda _: None)
+            capture.assert_not_called()
+            self.assertEqual(result['state'], 'QUEUED')
+            self.assertEqual(exit_code(result), 3)
+            self.assertEqual(len(api.submissions), 1)
+
+    def test_failed_score_survives_snapshot_failure_without_a_new_submission(self):
+        with tempfile.TemporaryDirectory() as td:
+            api, clock = FakeAPI(), Clock()
+            workflow = Workflow(api, Store(td), remote_check=lambda *a: {'verified': True}, sleep=clock.sleep, clock=clock)
+            workflow.create_profile('example', track='powercontext', branch='feature/csv', commit=COMMIT_A)
+            api.next_status = 3
+            submitted = workflow.submit('example')
+            with patch.object(workflow, 'snapshot', side_effect=ProtocolError('Changing leaderboard')):
+                result = run(parser().parse_args(['score', '--receipt', submitted['receipt'], '--wait', '--snapshot']), workflow, lambda _: None)
+            self.assertEqual(result['state'], 'FAILED')
+            self.assertIsNone(result['score_text'])
+            self.assertFalse(result['leaderboard']['complete'])
+            self.assertEqual(exit_code(result), 2)
+            self.assertEqual(len(api.submissions), 1)
 
     def test_terminal_result_survives_a_changing_leaderboard(self):
         with tempfile.TemporaryDirectory() as td:

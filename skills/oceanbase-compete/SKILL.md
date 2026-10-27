@@ -15,17 +15,19 @@ description: 通过 HTTP 操作 OceanBase 2026 大赛的 PowerContext、seekdb �
 
 ## 提测和精确查分
 
-用户要求提交即授权对指定版本提交，无需再次确认。代码题必须提供已推送的完整 40 位 commit 和分支，或使用配置内明确保存的版本。工具校验远端分支；旧提交需要 `--repo-path` 证明其仍在远端分支历史中。不要把未推送修改当作待测版本，也不要自动推送或公开参赛仓库。
+用户要求提交即授权对指定版本提交，无需再次确认。代码题必须提供已推送的完整 40 位 commit 和分支，或使用配置内明确保存的版本。工具校验远端分支；旧提交需要 `--repo-path` 证明其仍在远端分支历史中。不要把未推送修改当作待测版本。推送代码沿用当前开发任务中的用户授权；公开参赛仓库须有用户明确授权。
 
 ```text
 python <skill>/scripts/obcomp.py preflight --profile <名称> --branch <分支> --commit <完整SHA>
 python <skill>/scripts/obcomp.py submit --profile <名称> --branch <分支> --commit <完整SHA> --wait --snapshot
-python <skill>/scripts/obcomp.py score --receipt <回执绝对路径> --wait
+python <skill>/scripts/obcomp.py score --receipt <回执绝对路径> --wait --snapshot
 ```
 
 默认跳过同版本重复写入；仅当用户明确要求重新评测相同版本时使用 `--resubmit`。提交前回执会落盘。写入超时、无明确业务结果、服务端错误或任务关联不唯一时，保留回执并用 `reconcile --receipt <路径>` 核实，不重新发送提交请求。不确定关联时可由用户指定 `--task-id`，工具仍验证题目、仓库和版本。
 
 用户只要求查询时，使用已有回执；也可 `adopt --profile <名称> --task-id <ID>` 导入当前账号可见的旧任务，无需提交。状态以服务端为准，失败、取消和等待状态不输出旧数值成绩；成功的 `0.000` 是有效成绩。未经验证的错误编号只报告原始编号，不编造解释。
+
+等待超时后继续用同一回执查询，`score --wait --snapshot` 可在终止后自动抓取并关联榜单，无需再次提测。任务仍在等待时不抓终止快照。榜单变化或读取失败时，保留已取得的任务结果，并将榜单单独标为不完整。
 
 ## 榜单、比较和自动化
 

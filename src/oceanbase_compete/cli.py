@@ -95,6 +95,7 @@ def parser():
     score = command("score", "Query the exact task in a receipt")
     score.add_argument("--receipt", required=True)
     score.add_argument("--wait", action="store_true")
+    score.add_argument("--snapshot", action="store_true", help="Capture and link the leaderboard once this receipt is terminal")
     score.add_argument("--interval", type=number, default=15)
     score.add_argument("--timeout", type=number, default=600)
     reconcile = command("reconcile", "Resolve an accepted or uncertain submission without writing again")
@@ -197,7 +198,13 @@ def run(args, workflow, emit):
     if args.command == "adopt":
         return workflow.adopt(args.profile, args.task_id)
     if args.command == "score":
-        return workflow.wait_score(args.receipt, args.interval, args.timeout, emit=emit) if args.wait else workflow.score(args.receipt)
+        result = workflow.wait_score(args.receipt, args.interval, args.timeout, emit=emit) if args.wait else workflow.score(args.receipt)
+        if args.snapshot and result["state"] in ("SUCCEEDED", "FAILED", "CANCELLED"):
+            try:
+                result["leaderboard"] = workflow.snapshot(None, receipt_path=args.receipt)
+            except ToolError as exc:
+                result["leaderboard"] = {"complete": False, "outcome": exc.outcome, "message": str(exc), **exc.details}
+        return result
     if args.command == "reconcile":
         return workflow.reconcile(args.receipt, args.task_id)
     if args.command == "leaderboard":

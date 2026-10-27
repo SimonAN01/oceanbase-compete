@@ -412,18 +412,24 @@ class Workflow:
             client.deadline = previous_deadline
 
     def snapshot(self, name, page_size=100, max_pages=200, receipt_path=None):
+        receipt = self._load_receipt(receipt_path) if receipt_path else None
+        if name is None:
+            if receipt is None:
+                raise ToolError("A profile or submission receipt is required for a snapshot")
+            name = receipt.get("profile_name")
+            if not isinstance(name, str) or not name:
+                raise ToolError("Receipt has no valid profile for its leaderboard snapshot")
         has_auth = bool(getattr(self.api.client, "cookie", ""))
         profile = self.profile(name, authenticate=has_auth)
+        if receipt is not None and (receipt["payload"].get("questionId") != profile["question_id"] or receipt.get("result", {}).get("state") not in ("SUCCEEDED", "FAILED", "CANCELLED")):
+            raise ToolError("Snapshot can only attach to a terminal task in the same profile target")
         started = now()
         result = self.api.leaderboard(profile["question_id"], page_size, max_pages)
         snapshot_id = uuid.uuid4().hex
         personal = self.api.my_rank(profile["question_id"]) if has_auth else None
         snapshot = dict(result, schema=1, snapshot_id=snapshot_id, profile_name=name, account=profile["account"], scope={"camp_id": profile["camp_id"], "question_id": profile["question_id"], "stage": "camp_question"}, started_at=started, captured_at=now(), personal=personal, personal_authenticated=has_auth)
         path = self.store.save("snapshots", snapshot_id, self.api.client.redactor.clean(snapshot))
-        if receipt_path:
-            receipt = self._load_receipt(receipt_path)
-            if receipt["payload"].get("questionId") != profile["question_id"] or receipt.get("result", {}).get("state") not in ("SUCCEEDED", "FAILED", "CANCELLED"):
-                raise ToolError("Snapshot can only attach to a terminal task in the same profile target")
+        if receipt is not None:
             receipt["leaderboard_snapshot"] = {"snapshot_id": snapshot_id, "path": path, "captured_at": snapshot["captured_at"], "personal": personal}
             self._receipt_save(receipt)
         return dict(snapshot, snapshot=path)
