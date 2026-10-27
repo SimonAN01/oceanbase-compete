@@ -1,0 +1,4 @@
+interface:
+  display_name: "OceanBase 竞赛工具"
+  short_description: "提交固定代码版本、按回执查询成绩，完整抓取榜单并比较变化和恢复批量队列"
+  default_prompt: "使用 $oceanbase-compete 检查我的赛题配置，提交指定版本并等待评测，保存榜单快照。"

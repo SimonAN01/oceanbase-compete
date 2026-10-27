@@ -1,0 +1,4 @@
+include install.py
+recursive-include skills *.md *.yaml *.py
+recursive-include docs *.md
+global-exclude __pycache__ *.py[cod]
