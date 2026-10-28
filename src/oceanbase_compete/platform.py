@@ -2,6 +2,7 @@
 
 import re
 from decimal import Decimal, InvalidOperation
+from urllib.parse import unquote, urlsplit
 from .errors import AuthError, ProtocolError, ToolError
 from .storage import fingerprint
 from .transport import checked, dumps
@@ -41,7 +42,31 @@ def repo_url(value):
 
 
 def same_repo(a, b):
-    return repo_url(a).lower() == repo_url(b).lower()
+    return registered_repo_url(a).lower() == registered_repo_url(b).lower()
+
+
+def registered_repo_url(value):
+    """Canonical identity for a clone URL returned by the official platform.
+
+    Command-line repository arguments still use the credential-free repo_url.
+    A private clone credential is kept only in the adapter's process memory.
+    """
+    if not isinstance(value, str) or len(value) > 4096 or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value):
+        raise ToolError("Invalid registered GitHub repository URL")
+    try:
+        parsed = urlsplit(value)
+        if (parsed.scheme != "https" or parsed.hostname != "github.com"
+                or parsed.port is not None or "?" in value or "#" in value):
+            raise ValueError("invalid clone destination")
+        if parsed.username is not None or parsed.password is not None:
+            if not parsed.username or not parsed.password or value.count("@") != 1:
+                raise ValueError("incomplete clone credentials")
+            if any(c.isspace() or ord(c) < 32 or ord(c) == 127
+                   for c in unquote(parsed.username + parsed.password)):
+                raise ValueError("invalid clone credentials")
+        return repo_url("https://github.com" + parsed.path)
+    except ValueError:
+        raise ToolError("Invalid registered GitHub repository URL") from None
 
 
 def score_text(value):
@@ -120,7 +145,7 @@ def task_result(row):
         "task_id": str(row["id"]), "question_id": row.get("questionId"),
         "state": state, "score_text": score, "score_source": source,
         "branch": row.get("branch"), "commit": row.get("commitId"),
-        "repository": row.get("gitRepo"), "created_at": row.get("gmtCreate"),
+        "repository": registered_repo_url(row["gitRepo"]) if row.get("gitRepo") else None, "created_at": row.get("gmtCreate"),
         "updated_at": row.get("gmtModified"), "execution_time": row.get("executeTime"),
         "error_message": row.get("errorMessage"), "failure_code": row.get("failMsg"),
         "result_type": row.get("resultType"), "deleted": row.get("deleteFlag") == 1,
@@ -130,6 +155,14 @@ def task_result(row):
 class Platform:
     def __init__(self, client):
         self.client = client
+        self._clone_urls = {}
+
+    def _clone_identity(self, value):
+        identity = registered_repo_url(value)
+        password = urlsplit(value).password
+        if password:
+            self.client.redactor.values.update((password, unquote(password)))
+        return identity
 
     def get(self, path, params=None):
         return checked(self.client.request("GET", BASE + path, params=params))
@@ -167,11 +200,18 @@ class Platform:
         data = checked(self.client.request("POST", BASE + "taskrecord/backFillCommitDetail", body={"questionId": positive_int(question_id)}))
         if not isinstance(data, dict) or not data.get("gitUrl"):
             raise ToolError("No registered team repository for this question")
-        repo_url(data["gitUrl"])
-        return data
+        clone_url = data["gitUrl"]
+        identity = self._clone_identity(clone_url)
+        self._clone_urls[positive_int(question_id)] = (identity, clone_url)
+        return dict(self.client.redactor.clean(data), gitUrl=identity,
+                    repository_authenticated=bool(urlsplit(clone_url).password))
 
     def tasks(self, question_id):
-        return collect_pages(lambda p: self.get("taskrecord/queryTestPlatformTaskRecordList", p), {"questionId": positive_int(question_id), "sortType": 1})
+        rows = collect_pages(lambda p: self.get("taskrecord/queryTestPlatformTaskRecordList", p), {"questionId": positive_int(question_id), "sortType": 1})
+        for row in rows:
+            if row.get("gitRepo"):
+                row["gitRepo"] = self._clone_identity(row["gitRepo"])
+        return self.client.redactor.clean(rows)
 
     def details(self, task_id):
         data = self.get("taskrecord/queryTaskRecordDetail", {"taskId": positive_int(task_id)})
@@ -194,7 +234,16 @@ class Platform:
         return {"entry_id": str(data["id"]), "team_id": str(data["groupId"]) if data.get("groupId") is not None else None, "rank": rank, "rank_source": "server" if rank is not None else "unavailable", "score_text": score, "score_source": source}
 
     def submit(self, payload):
-        return checked(self.client.request("POST", BASE + "taskrecord/commitTestPlatformTaskRecord", body=payload, uncertain=True), uncertain=True)
+        body = dict(payload)
+        body["gitRepo"] = repo_url(payload["gitRepo"])
+        registered = self._clone_urls.get(positive_int(payload["questionId"]))
+        if registered:
+            identity, clone_url = registered
+            if not same_repo(identity, payload["gitRepo"]):
+                raise ToolError("Submission repository differs from its authenticated registration")
+            body["gitRepo"] = clone_url
+        envelope = self.client.request("POST", BASE + "taskrecord/commitTestPlatformTaskRecord", body=body, uncertain=True)
+        return checked(self.client.redactor.clean(envelope), uncertain=True)
 
     def verification(self, question_id):
         options = self.options(question_id)

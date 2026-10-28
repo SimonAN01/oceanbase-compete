@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oceanbase-compete"
-version = "0.1.0"
+version = "0.1.1"
 description = "Unofficial OceanBase competition submission, scoring, leaderboard and experiment CLI"
 readme = "README.md"
 requires-python = ">=3.10"

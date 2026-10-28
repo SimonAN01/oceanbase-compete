@@ -117,6 +117,10 @@ class Redactor:
         if isinstance(value, (list, tuple)):
             return [self.clean(v) for v in value]
         if isinstance(value, str):
+            # Official private clone URLs contain username:PAT userinfo. Keep
+            # repository identities usable in receipts without that userinfo.
+            value = re.sub(r"(?i)(https?://)[^/\s@]+@", r"\1", value)
+            value = re.sub(r"\b(?:github_pat_[A-Za-z0-9_]{10,}|gh[pousr]_[A-Za-z0-9]{16,})\b", "[redacted]", value)
             for secret in sorted(self.values, key=len, reverse=True):
                 if secret:
                     value = value.replace(secret, "[redacted]")

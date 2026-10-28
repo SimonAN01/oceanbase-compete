@@ -238,7 +238,7 @@ class InstallerTests(unittest.TestCase):
             entry = destination / 'scripts' / 'obcomp.py'
             result = subprocess.run([sys.executable, str(entry), '--version'], capture_output=True, text=True, timeout=15, cwd=td)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.strip(), '0.1.0')
+            self.assertEqual(result.stdout.strip(), '0.1.1')
             self.assertTrue((destination / 'SKILL.md').is_file())
             self.assertFalse(any('cookie' in p.name.lower() for p in destination.rglob('*')))
             with self.assertRaises(ValueError):

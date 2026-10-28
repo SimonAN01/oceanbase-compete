@@ -195,7 +195,7 @@ class Workflow:
             raise ProtocolError("Question submission options identify a different camp")
         registered = self.api.registration(question_id)
         actual_repo = repo_url(registered["gitUrl"])
-        if repository and not same_repo(repository, actual_repo):
+        if repository and not same_repo(repo_url(repository), actual_repo):
             raise ToolError("Repository differs from the team's registered repository")
         if branch is not None or commit is not None:
             branch, commit = validate_version(branch, commit)
@@ -253,7 +253,7 @@ class Workflow:
         if extras:
             payload["extraParams"] = extras
         tasks = self.api.tasks(qid)
-        return {"outcome": "preflight_passed", "profile": profile, "payload": payload, "remote_version": remote, "submission_options": options, "limits": {k: question.get(k) for k in ("dailyCommitNumber", "commitTimeInterval", "commitNumber", "reserveOneTaskRecord")}, "limits_note": "Null values and undocumented units are unknown; server enforcement remains authoritative", "tasks": tasks}
+        return {"outcome": "preflight_passed", "profile": profile, "payload": payload, "registered_repository_authenticated": registered.get("repository_authenticated", False), "remote_version": remote, "submission_options": options, "limits": {k: question.get(k) for k in ("dailyCommitNumber", "commitTimeInterval", "commitNumber", "reserveOneTaskRecord")}, "limits_note": "Null values and undocumented units are unknown; server enforcement remains authoritative", "tasks": tasks}
 
     def _receipt_save(self, receipt):
         receipt["updated_at"] = now()

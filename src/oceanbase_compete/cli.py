@@ -280,6 +280,7 @@ def main(argv=None):
         cookie = load_cookie(args.cookie_file, args.cookie_stdin)
         redactor = Redactor(cookie)
         client = Client(cookie, args.http_timeout, args.retries)
+        redactor = client.redactor
         workflow = Workflow(Platform(client), Store(args.state_dir))
         def emit(value):
             print(dumps(redactor.clean(value)), file=sys.stderr, flush=True)

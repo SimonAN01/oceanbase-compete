@@ -98,6 +98,10 @@ obcomp submit --profile powercontext-2026 \
 
 也可在创建 profile 时保存明确的 `--branch` 和 `--commit`，以后直接使用 `submit --profile ... --wait --snapshot`。本地未推送修改不会被自动提交。Git 通过现有的凭证管理器访问私有仓库，OceanBase Cookie 不会发送到 GitHub。
 
+OceanBase 的[官方 GitHub 使用说明](https://oceanbase.yuque.com/org-wiki-obtech-vh7w9r/hc3pio/qs1povt8zbza6hts)要求私有答题仓库在报名地址中配置 `username:PAT`，评测系统才具有拉取权限。请自行在官方参赛信息中配置，并使用仅授权该仓库读取的 PAT。工具不会获取现有 GitHub CLI 或浏览器凭证，也不创建或更改报名授权。
+
+工具支持官方回填的带凭证 HTTPS 克隆地址：仅在当前进程内保留原地址，并只用于同一题目、同一仓库的提测请求；profile、预检载荷、回执和任务结果均使用无凭证地址。预检的 `registered_repository_authenticated` 只表示报名地址中存在凭证，不证明其有效。直接传给 `--repository` 的地址仍须不含凭证。任务历史、错误消息及导出会移除 URL 中的用户名与 PAT，并脱敏已识别的 GitHub token。
+
 默认要求 commit 等于远端指定分支的 tip。若提交该分支历史中的旧 commit，另加 `--repo-path /path/to/checkout`；本地 origin 必须匹配报名仓库，并能证明 commit 是远端 tip 的祖先。远端验证失败会在发出提测请求前停止。
 
 同一题目、仓库、分支、版本和材料重复执行时默认复用回执或已有任务。确实需要重新评测相同版本时显式指定 `--resubmit`。`--snapshot` 必须搭配 `--wait`，仅在该任务终止后捕获当时的榜单，不代表这次失败的提交产生了新分数。

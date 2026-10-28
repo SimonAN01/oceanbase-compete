@@ -30,6 +30,14 @@ class Opener:
 
 
 class CookieTests(unittest.TestCase):
+    def test_credential_urls_in_messages_are_canonicalized_without_cookie_knowledge(self):
+        value = Redactor().clean('clone failed: https://user:synthetic%2Dpat@github.com/example/answer.git')
+        self.assertEqual(value, 'clone failed: https://github.com/example/answer.git')
+
+    def test_bare_github_tokens_in_old_task_messages_are_redacted(self):
+        token = 'github_pat_' + 'synthetic' * 10
+        self.assertEqual(Redactor().clean('failed ' + token), 'failed [redacted]')
+
     def test_raw_header_and_prefix(self):
         self.assertEqual(load_cookie(stdin=True, stream=io.StringIO('Cookie: a=b; c=d\n')), 'a=b; c=d')
 

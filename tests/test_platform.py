@@ -1,13 +1,19 @@
 import copy
+import tempfile
 import unittest
+from pathlib import Path
 
 from oceanbase_compete.errors import AuthError, ProtocolError, ToolError
 from oceanbase_compete.platform import Platform, collect_pages, repo_url, task_result
+from oceanbase_compete.transport import Redactor
+from oceanbase_compete.storage import Store, now
+from oceanbase_compete.workflow import Workflow
 
 
 class APIClient:
     def __init__(self, responses):
         self.responses, self.calls = list(responses), []
+        self.redactor = Redactor()
 
     def request(self, method, url, **kwargs):
         self.calls.append((method, url, kwargs))
@@ -59,6 +65,105 @@ class PaginationTests(unittest.TestCase):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_private_submission_round_trip_keeps_every_state_file_credential_free(self):
+        clone = 'https://example:synthetic-readonly-pat@github.com/example/private-answer'
+
+        class PrivateServer(APIClient):
+            def __init__(self):
+                super().__init__([])
+                self.rows = []
+
+            def request(self, method, url, **kwargs):
+                self.calls.append((method, url, copy.deepcopy(kwargs)))
+                if url.endswith('/api/user'):
+                    return {'success': True, 'data': {'uid': 'synthetic-private-user'}}
+                if url.endswith('queryOpenTestPlatformCampList'):
+                    data = page([{'id': 21}], 1)
+                elif url.endswith('webQueryTestPlatformQuestionList'):
+                    data = page([{'id': 600069, 'questionName': 'Synthetic private code'}], 1)
+                elif url.endswith('submissionOptions'):
+                    data = {'managed': True, 'available': True, 'questionId': 600069,
+                            'campId': 21, 'extraFields': [], 'requiredFields': []}
+                elif url.endswith('backFillCommitDetail'):
+                    data = {'gitUrl': clone}
+                elif url.endswith('queryTestPlatformTaskRecordList'):
+                    data = page(copy.deepcopy(self.rows), len(self.rows))
+                elif url.endswith('commitTestPlatformTaskRecord'):
+                    row = dict(kwargs['body'], id=101, taskStatus=2, strMachineScore='0.000',
+                               gmtCreate=now(), gmtModified=now())
+                    self.rows.append(row)
+                    data = {'taskId': 101}
+                elif url.endswith('queryTaskRecordDetail'):
+                    data = []
+                else:
+                    raise AssertionError('Unexpected synthetic route: ' + url)
+                return {'code': 200, 'data': data}
+
+        client = PrivateServer()
+        with tempfile.TemporaryDirectory() as directory:
+            workflow = Workflow(Platform(client), Store(directory),
+                                remote_check=lambda *_: {'verified': True})
+            profile = workflow.create_profile('private', track='seekdb-code',
+                                              branch='answer', commit='a' * 40)
+            result = workflow.submit('private')
+            self.assertEqual(result['task_id'], '101')
+            self.assertEqual(profile['repository'], 'https://github.com/example/private-answer')
+            self.assertNotIn('synthetic-readonly-pat', str(result))
+            for path in Path(directory).rglob('*'):
+                if path.is_file():
+                    self.assertNotIn('synthetic-readonly-pat', path.read_text(), str(path))
+        writes = [c for c in client.calls if c[1].endswith('commitTestPlatformTaskRecord')]
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0][2]['body']['gitRepo'], clone)
+
+    def test_registered_clone_credentials_are_ephemeral_and_sent_only_on_submit(self):
+        canonical = 'https://github.com/example/private-answer'
+        clone = 'https://example:synthetic-readonly-pat@github.com/example/private-answer.git'
+        client = APIClient([{'code': 200, 'data': {'gitUrl': clone}},
+                            {'code': 200, 'data': {'taskId': 101, 'echo': clone,
+                                                   'message': 'synthetic-readonly-pat'}}])
+        api = Platform(client)
+        registered = api.registration(600069)
+        self.assertEqual(registered['gitUrl'], canonical)
+        self.assertTrue(registered['repository_authenticated'])
+        self.assertNotIn('synthetic-readonly-pat', str(registered))
+        payload = {'questionId': 600069, 'gitRepo': canonical,
+                   'branch': 'feature/answer', 'commitId': 'a' * 40}
+        result = api.submit(payload)
+        self.assertEqual(client.calls[-1][2]['body']['gitRepo'], clone)
+        self.assertEqual(payload['gitRepo'], canonical)
+        self.assertEqual(result['taskId'], 101)
+        self.assertNotIn('synthetic-readonly-pat', str(result))
+
+    def test_registered_credentials_never_follow_a_different_repository(self):
+        client = APIClient([{'code': 200, 'data': {
+            'gitUrl': 'https://example:synthetic-pat@github.com/example/answer'}}])
+        api = Platform(client)
+        api.registration(600069)
+        with self.assertRaises(ToolError):
+            api.submit({'questionId': 600069, 'gitRepo': 'https://github.com/example/other'})
+        self.assertEqual(len(client.calls), 1)
+
+    def test_task_clone_credentials_are_removed_before_results_escape_adapter(self):
+        clone = 'https://example:synthetic-readonly-pat@github.com/example/answer'
+        client = APIClient([{'code': 200, 'data': page([
+            {'id': 101, 'questionId': 600069, 'taskStatus': 2,
+             'gitRepo': clone, 'errorMessage': 'synthetic-readonly-pat'}], 1)}])
+        rows = Platform(client).tasks(600069)
+        self.assertEqual(rows[0]['gitRepo'], 'https://github.com/example/answer')
+        self.assertNotIn('synthetic-readonly-pat', str(rows))
+        self.assertEqual(task_result(rows[0])['repository'], 'https://github.com/example/answer')
+
+    def test_registered_clone_url_cannot_change_host_or_add_query(self):
+        for clone in ['https://example:synthetic-pat@evil.example/example/answer',
+                      'https://example:synthetic-pat@github.com:444/example/answer',
+                      'https://example:synthetic-pat@github.com/example/answer?x=1',
+                      'https://example:synthetic-pat@github.com/example/answer?',
+                      'https://example:synthetic%0Apat@github.com/example/answer',
+                      'https://example@github.com/example/answer']:
+            with self.subTest(clone=clone), self.assertRaises(ToolError):
+                Platform(APIClient([{'code': 200, 'data': {'gitUrl': clone}}])).registration(600069)
+
     def test_anonymous_http_success_is_not_authenticated(self):
         with self.assertRaises(AuthError):
             Platform(APIClient([{'success': False}])).user()
